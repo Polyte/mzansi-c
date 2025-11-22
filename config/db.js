@@ -1,13 +1,18 @@
 const mongoose = require('mongoose');
 
 const connectDB = async () => {
-  const mongoURI = process.env.MONGODB_URI || 'mongodb://localhost:27017/mzansi';
+  // Support both MONGODB_URI and connection_string for compatibility
+  const mongoURI = process.env.MONGODB_URI || process.env.connection_string || 'mongodb://localhost:27017/mzansi';
   
   try {
     const conn = await mongoose.connect(mongoURI, {
-      useNewUrlParser: true,
-      useUnifiedTopology: true,
+      // Note: useNewUrlParser and useUnifiedTopology are deprecated in Mongoose 6+
+      // They're kept for backward compatibility but have no effect
       serverSelectionTimeoutMS: 5000, // Timeout after 5s instead of 30s
+      // MongoDB Atlas requires SSL/TLS - these options help with SSL errors
+      ssl: mongoURI.includes('mongodb+srv://') || mongoURI.includes('mongodb.net'),
+      tlsAllowInvalidCertificates: false,
+      tlsAllowInvalidHostnames: false,
     });
 
     console.log(`📦 MongoDB Connected: ${conn.connection.host}`);

@@ -43,8 +43,11 @@ router.post('/register', [
       password,
       phone,
       role: role || 'rider',
-      
-      isDriver: role === 'driver'
+      isDriver: role === 'driver',
+      verification: {
+        emailVerified: false,
+        phoneVerified: false,
+      },
     });
 
     const token = generateToken(user._id);

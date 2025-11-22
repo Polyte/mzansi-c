@@ -165,10 +165,21 @@ router.post('/', protect, [
         }).select('_id name driverInfo');
 
         console.log(`🔍 Found ${drivers.length} available drivers, checking proximity to pickup (${pickupLat}, ${pickupLng})...`);
+        
+        // Log all active driver rooms for debugging
+        const allDriverRooms = Array.from(io.sockets.adapter.rooms.keys()).filter(r => r.startsWith('driver-'));
+        console.log(`📋 Active driver rooms: ${allDriverRooms.length}`);
+        if (allDriverRooms.length > 0) {
+          allDriverRooms.forEach(room => {
+            const members = io.sockets.adapter.rooms.get(room);
+            console.log(`   - ${room}: ${members?.size || 0} socket(s)`);
+          });
+        }
 
         // Filter by distance and emit to each driver
         let driversNotified = 0;
         let driversTooFar = 0;
+        let driversNotInRoom = 0;
         drivers.forEach(driver => {
           if (!driver.driverInfo?.currentLocation) {
             console.log(`⚠️ Driver ${driver._id} has no location set`);
@@ -192,9 +203,23 @@ router.post('/', protect, [
           // If driver is within radius, send them the ride request
           if (distance <= radius) {
             const driverRoom = `driver-${driver._id}`;
-            console.log(`📤 Sending ride request to driver ${driver._id} (${driver.name}) in room ${driverRoom} (${distance.toFixed(2)}km away)`);
-            io.to(driverRoom).emit('new-ride-request', ride.toObject());
-            driversNotified++;
+            
+            // Verify driver is actually in the socket room before sending
+            const roomMembers = io.sockets.adapter.rooms.get(driverRoom);
+            const isDriverInRoom = roomMembers && roomMembers.size > 0;
+            
+            if (isDriverInRoom) {
+              console.log(`📤 Sending ride request to driver ${driver._id} (${driver.name}) in room ${driverRoom} (${distance.toFixed(2)}km away, ${roomMembers.size} socket(s) in room)`);
+              io.to(driverRoom).emit('new-ride-request', ride.toObject());
+              driversNotified++;
+            } else {
+              driversNotInRoom++;
+              console.log(`⚠️ Driver ${driver._id} (${driver.name}) is available but NOT in socket room ${driverRoom} - request NOT sent`);
+              console.log(`   💡 Driver may have disconnected or not joined the room yet`);
+              console.log(`   💡 Check if driver socket is connected and has joined room`);
+              console.log(`   💡 Expected room: ${driverRoom}`);
+              console.log(`   💡 Available rooms: ${allDriverRooms.join(', ') || 'none'}`);
+            }
           } else {
             driversTooFar++;
             console.log(`⏭️ Driver ${driver._id} (${driver.name}) is too far: ${distance.toFixed(2)}km (radius: ${radius}km)`);
@@ -202,10 +227,15 @@ router.post('/', protect, [
         });
 
         console.log(`✅ Ride request sent to ${driversNotified} nearby driver(s)`);
+        console.log(`📊 Summary: ${driversNotified} notified, ${driversTooFar} too far, ${driversNotInRoom} not in socket room`);
         
         if (driversNotified === 0) {
           if (drivers.length === 0) {
             console.log(`⚠️ No available drivers found at all`);
+            console.log(`   💡 Check: Driver must toggle "Go Online" and have location set`);
+          } else if (driversNotInRoom > 0) {
+            console.log(`⚠️ ${driversNotInRoom} driver(s) found but NOT connected to socket`);
+            console.log(`   💡 Driver needs to: 1) Connect socket 2) Join driver room 3) Toggle "Go Online"`);
           } else if (driversTooFar > 0) {
             console.log(`⚠️ ${driversTooFar} driver(s) found but all are outside ${radius}km radius`);
           } else {

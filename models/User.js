@@ -36,6 +36,22 @@ const userSchema = new mongoose.Schema({
     type: Boolean,
     default: false
   },
+  // Verification fields for riders
+  verification: {
+    emailVerified: {
+      type: Boolean,
+      default: false
+    },
+    phoneVerified: {
+      type: Boolean,
+      default: false
+    },
+    emailVerificationCode: String,
+    emailVerificationCodeExpiry: Date,
+    phoneVerificationCode: String,
+    phoneVerificationCodeExpiry: Date,
+    verifiedAt: Date
+  },
   driverInfo: {
     licenseNumber: String,
     licenseExpiry: Date,

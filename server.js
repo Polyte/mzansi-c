@@ -14,6 +14,7 @@ const voiceRoutes = require('./routes/voice');
 const securityRoutes = require('./routes/security');
 const chatRoutes = require('./routes/chat');
 const loyaltyRoutes = require('./routes/loyalty');
+const verificationRoutes = require('./routes/verification');
 
 const app = express();
 const server = http.createServer(app);
@@ -55,6 +56,7 @@ app.use('/api/voice', voiceRoutes);
 app.use('/api/security', securityRoutes);
 app.use('/api/chat', chatRoutes);
 app.use('/api/loyalty', loyaltyRoutes.router);
+app.use('/api/verification', verificationRoutes);
 
 // Socket.io for real-time updates
 io.on('connection', (socket) => {
@@ -73,7 +75,14 @@ io.on('connection', (socket) => {
         const roomMembers = io.sockets.adapter.rooms.get(room);
         if (roomMembers) {
           console.log(`📊 Room ${room} now has ${roomMembers.size} member(s)`);
+          console.log(`   Socket IDs in room:`, Array.from(roomMembers));
+        } else {
+          console.warn(`⚠️ Room ${room} was created but has no members - this shouldn't happen`);
         }
+        
+        // Log all current driver rooms for debugging
+        const allRooms = Array.from(io.sockets.adapter.rooms.keys()).filter(r => r.startsWith('driver-'));
+        console.log(`📋 Total driver rooms active: ${allRooms.length}`);
       } else if (room === 'admin') {
         // Admin room for dashboard updates
         socket.join('admin');
