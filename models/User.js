@@ -114,6 +114,53 @@ const userSchema = new mongoose.Schema({
     walletProvider: String, // For eWallet (e.g., 'PayPal', 'Apple Pay', etc.)
     phoneNumber: String // For eWallet that uses phone numbers
   }],
+  // Favorite/Saved Locations
+  favoriteLocations: [{
+    name: {
+      type: String,
+      required: true
+    },
+    address: String,
+    latitude: Number,
+    longitude: Number,
+    type: {
+      type: String,
+      enum: ['home', 'work', 'favorite', 'other'],
+      default: 'favorite'
+    },
+    createdAt: {
+      type: Date,
+      default: Date.now
+    }
+  }],
+  // Ride Preferences
+  ridePreferences: {
+    music: {
+      type: String,
+      enum: ['none', 'quiet', 'moderate', 'loud'],
+      default: 'moderate'
+    },
+    temperature: {
+      type: String,
+      enum: ['cool', 'moderate', 'warm'],
+      default: 'moderate'
+    },
+    conversation: {
+      type: String,
+      enum: ['none', 'minimal', 'moderate', 'friendly'],
+      default: 'moderate'
+    },
+    accessibility: {
+      wheelchairAccessible: {
+        type: Boolean,
+        default: false
+      },
+      assistanceNeeded: {
+        type: Boolean,
+        default: false
+      }
+    }
+  },
   emergencyContacts: {
     emergency: {
       type: String,
