@@ -292,21 +292,54 @@ router.put('/:id/accept', protect, authorize('driver'), async (req, res) => {
       .populate('driver', 'name email phone');
 
     if (!ride) {
+      console.log(`❌ Ride not found: ${req.params.id}`);
       return res.status(404).json({ message: 'Ride not found' });
     }
 
-    if (ride.status !== 'pending') {
-      return res.status(400).json({ message: 'Ride is not available' });
+    // Check if this driver already accepted this ride (handle duplicate requests)
+    if (ride.driver && ride.driver._id.toString() === req.user.id.toString()) {
+      console.log(`✅ Driver ${req.user.id} already accepted ride ${ride._id}`);
+      return res.json(ride);
     }
 
-    if (ride.driver) {
-      return res.status(400).json({ message: 'Ride already has a driver' });
+    // Check if ride already has a different driver
+    if (ride.driver && ride.driver._id.toString() !== req.user.id.toString()) {
+      console.log(`⚠️ Ride ${ride._id} already has driver ${ride.driver._id}, rejecting driver ${req.user.id}`);
+      return res.status(400).json({ 
+        message: 'Ride already has a driver',
+        currentStatus: ride.status,
+        currentDriver: ride.driver._id.toString()
+      });
+    }
+
+    // Check ride status with more specific error messages
+    if (ride.status !== 'pending') {
+      console.log(`⚠️ Ride ${ride._id} is not available. Status: ${ride.status}, Driver: ${ride.driver?._id || 'none'}`);
+      
+      let errorMessage = 'Ride is not available';
+      if (ride.status === 'accepted') {
+        errorMessage = 'Ride has already been accepted by another driver';
+      } else if (ride.status === 'cancelled') {
+        errorMessage = 'Ride has been cancelled';
+      } else if (ride.status === 'completed') {
+        errorMessage = 'Ride has already been completed';
+      } else if (ride.status === 'in_progress') {
+        errorMessage = 'Ride is already in progress';
+      }
+      
+      return res.status(400).json({ 
+        message: errorMessage,
+        currentStatus: ride.status,
+        rideId: ride._id.toString()
+      });
     }
 
     // Assign driver
     ride.driver = req.user.id;
     ride.status = 'accepted';
     await ride.save();
+
+    console.log(`✅ Driver ${req.user.id} accepted ride ${ride._id}`);
 
     // Populate driver info
     await ride.populate('driver', 'name email phone');
@@ -326,12 +359,14 @@ router.put('/:id/accept', protect, authorize('driver'), async (req, res) => {
 
       // Notify other drivers that this ride is no longer available
       io.emit('trip-unavailable', { rideId: ride._id });
+      
+      console.log(`📤 Emitted trip-accepted and trip-unavailable for ride ${ride._id}`);
     }
 
     res.json(ride);
   } catch (error) {
     console.error('Accept ride error:', error);
-    res.status(500).json({ message: 'Server error' });
+    res.status(500).json({ message: 'Server error', error: error.message });
   }
 });
 
@@ -499,15 +534,25 @@ router.put('/:id/rate', protect, [
       return res.status(400).json({ message: 'Ride already rated' });
     }
 
-    // Save rating
-    ride.rating = {
-      ...ride.rating,
-      rider: {
-        stars,
-        suggestions,
-        review
-      }
+    // Save rating - preserve existing driver rating if it exists
+    // Initialize rating object if it doesn't exist
+    if (!ride.rating) {
+      ride.rating = {};
+    }
+    
+    // Set rider rating
+    ride.rating.rider = {
+      stars,
+      suggestions,
+      review
     };
+    
+    // Preserve driver rating if it exists and is a valid object, otherwise ensure it's an empty object
+    if (!ride.rating.driver || typeof ride.rating.driver !== 'object' || Array.isArray(ride.rating.driver)) {
+      ride.rating.driver = {};
+    }
+    // If driver rating exists, preserve it (don't overwrite)
+    
     await ride.save();
 
     // Update driver's average rating
