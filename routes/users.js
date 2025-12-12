@@ -1,5 +1,6 @@
 const express = require('express');
 const User = require('../models/User');
+const Ride = require('../models/Ride');
 const { protect, authorize } = require('../middleware/auth');
 
 const router = express.Router();
@@ -133,9 +134,90 @@ router.put('/driver-availability', protect, authorize('driver'), async (req, res
       hasLocation: !!user.driverInfo.currentLocation
     });
 
+    // If driver just went online and has location, check for pending rides
+    if (isAvailable && user.driverInfo.currentLocation) {
+      const io = req.app.get('io');
+      if (io) {
+        // Delay slightly to ensure socket room is joined
+        setTimeout(() => {
+          checkAndNotifyPendingRides(user._id, user.driverInfo.currentLocation, io);
+        }, 1000);
+      }
+    }
+
     res.json(user);
   } catch (error) {
     console.error('Update driver availability error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// @route   PUT /api/users/courier-location
+// @desc    Update courier location
+// @access  Private (Courier only)
+router.put('/courier-location', protect, async (req, res) => {
+  try {
+    const { latitude, longitude } = req.body;
+    const user = await User.findById(req.user.id);
+    
+    if (!user || !user.isCourier) {
+      return res.status(403).json({ message: 'Only couriers can update location' });
+    }
+
+    if (!user.courierInfo) {
+      user.courierInfo = {};
+    }
+
+    user.courierInfo.currentLocation = {
+      latitude,
+      longitude
+    };
+
+    await user.save();
+    res.json(user);
+  } catch (error) {
+    console.error('Update courier location error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// @route   PUT /api/users/courier-availability
+// @desc    Update courier availability
+// @access  Private (Courier only)
+router.put('/courier-availability', protect, async (req, res) => {
+  try {
+    const { isAvailable, currentLocation } = req.body;
+    const user = await User.findById(req.user.id);
+    
+    if (!user || !user.isCourier) {
+      return res.status(403).json({ message: 'Only couriers can update availability' });
+    }
+
+    if (!user.courierInfo) {
+      user.courierInfo = {};
+    }
+
+    if (typeof isAvailable === 'boolean') {
+      user.courierInfo.isAvailable = isAvailable;
+      
+      // Auto-verify couriers for development (remove in production)
+      if (isAvailable && !user.courierInfo.isVerified) {
+        user.courierInfo.isVerified = true;
+        console.log(`Auto-verified courier ${user._id} for development`);
+      }
+    }
+
+    if (currentLocation) {
+      user.courierInfo.currentLocation = {
+        latitude: currentLocation.latitude,
+        longitude: currentLocation.longitude
+      };
+    }
+
+    await user.save();
+    res.json(user);
+  } catch (error) {
+    console.error('Update courier availability error:', error);
     res.status(500).json({ message: 'Server error' });
   }
 });
@@ -537,6 +619,219 @@ router.delete('/banking-details/:id', protect, authorize('driver'), async (req, 
   } catch (error) {
     console.error('Delete banking details error:', error);
     res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// Helper function to check for pending rides and notify driver
+async function checkAndNotifyPendingRides(driverId, driverLocation, io) {
+  try {
+    const radius = 10; // 10km radius
+    const driverLat = driverLocation.latitude;
+    const driverLng = driverLocation.longitude;
+
+    // Find pending rides
+    const pendingRides = await Ride.find({
+      status: 'pending',
+      driver: { $exists: false } // No driver assigned yet
+    }).populate('rider', 'name email phone').sort({ createdAt: -1 });
+
+    console.log(`🔍 Checking for pending rides for driver ${driverId}...`);
+    console.log(`   Found ${pendingRides.length} pending ride(s)`);
+
+    if (pendingRides.length === 0) {
+      return;
+    }
+
+    const driverRoom = `driver-${String(driverId)}`;
+    const roomMembers = io.sockets.adapter.rooms.get(driverRoom);
+    const isDriverInRoom = roomMembers && roomMembers.size > 0;
+
+    if (!isDriverInRoom) {
+      console.log(`⚠️ Driver ${driverId} not in socket room ${driverRoom} - cannot send pending rides`);
+      return;
+    }
+
+    let ridesNotified = 0;
+    let ridesTooFar = 0;
+
+    pendingRides.forEach(ride => {
+      if (!ride.pickupLocation) {
+        return;
+      }
+
+      const pickupLat = ride.pickupLocation.latitude;
+      const pickupLng = ride.pickupLocation.longitude;
+
+      // Calculate distance
+      const R = 6371; // Earth's radius in km
+      const dLat = (pickupLat - driverLat) * Math.PI / 180;
+      const dLng = (pickupLng - driverLng) * Math.PI / 180;
+      const a = 
+        Math.sin(dLat/2) * Math.sin(dLat/2) +
+        Math.cos(driverLat * Math.PI / 180) * Math.cos(pickupLat * Math.PI / 180) *
+        Math.sin(dLng/2) * Math.sin(dLng/2);
+      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+      const distance = R * c;
+
+      if (distance <= radius) {
+        console.log(`📤 Sending pending ride ${ride._id} to driver ${driverId} (${distance.toFixed(2)}km away)`);
+        io.to(driverRoom).emit('new-ride-request', ride.toObject());
+        ridesNotified++;
+      } else {
+        ridesTooFar++;
+      }
+    });
+
+    console.log(`✅ Sent ${ridesNotified} pending ride(s) to driver ${driverId} (${ridesTooFar} too far)`);
+  } catch (error) {
+    console.error('Error checking pending rides:', error);
+  }
+}
+
+// @route   GET /api/users/driver-status
+// @desc    Get driver status and socket room information (diagnostic endpoint)
+// @access  Private (Driver only)
+router.get('/driver-status', protect, authorize('driver'), async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id);
+    const io = req.app.get('io');
+    
+    if (!io) {
+      return res.status(500).json({ message: 'Socket.io not initialized' });
+    }
+
+    const driverId = user._id.toString();
+    const driverRoom = `driver-${driverId}`;
+    const roomMembers = io.sockets.adapter.rooms.get(driverRoom);
+    const isInRoom = roomMembers && roomMembers.size > 0;
+    
+    // Get all driver rooms for comparison
+    const allDriverRooms = Array.from(io.sockets.adapter.rooms.keys()).filter(r => r.startsWith('driver-'));
+    
+    const status = {
+      driverId,
+      driverRoom,
+      isAvailable: user.driverInfo?.isAvailable || false,
+      isVerified: user.driverInfo?.isVerified || false,
+      hasLocation: !!user.driverInfo?.currentLocation,
+      location: user.driverInfo?.currentLocation || null,
+      isInSocketRoom: isInRoom,
+      socketRoomMembers: isInRoom ? roomMembers.size : 0,
+      allDriverRooms: allDriverRooms,
+      socketRoomsCount: allDriverRooms.length,
+      issues: []
+    };
+
+    // Check for issues
+    if (!status.isAvailable) {
+      status.issues.push('Driver is not available (toggle "Go Online")');
+    }
+    if (!status.hasLocation) {
+      status.issues.push('Driver location is not set');
+    }
+    if (!status.isInSocketRoom) {
+      status.issues.push(`Driver is not in socket room ${driverRoom}`);
+      status.issues.push('Make sure socket is connected and room is joined');
+    }
+    if (!status.isVerified) {
+      status.issues.push('Driver is not verified (should auto-verify in development)');
+    }
+
+    res.json(status);
+  } catch (error) {
+    console.error('Get driver status error:', error);
+    res.status(500).json({ message: 'Server error', error: error.message });
+  }
+});
+
+// @route   GET /api/users/pending-rides
+// @desc    Get pending rides near driver (diagnostic endpoint)
+// @access  Private (Driver only)
+router.get('/pending-rides', protect, authorize('driver'), async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id);
+    const io = req.app.get('io');
+    
+    if (!user.driverInfo?.isAvailable || !user.driverInfo?.currentLocation) {
+      return res.json({
+        message: 'Driver not available or location not set',
+        pendingRides: [],
+        count: 0
+      });
+    }
+
+    const radius = 10; // 10km radius
+    const driverLat = user.driverInfo.currentLocation.latitude;
+    const driverLng = user.driverInfo.currentLocation.longitude;
+
+    // Find pending rides
+    const pendingRides = await Ride.find({
+      status: 'pending',
+      driver: { $exists: false }
+    }).populate('rider', 'name email phone').sort({ createdAt: -1 });
+
+    const nearbyRides = [];
+    const tooFarRides = [];
+
+    pendingRides.forEach(ride => {
+      if (!ride.pickupLocation) return;
+
+      const pickupLat = ride.pickupLocation.latitude;
+      const pickupLng = ride.pickupLocation.longitude;
+
+      // Calculate distance
+      const R = 6371;
+      const dLat = (pickupLat - driverLat) * Math.PI / 180;
+      const dLng = (pickupLng - driverLng) * Math.PI / 180;
+      const a = 
+        Math.sin(dLat/2) * Math.sin(dLat/2) +
+        Math.cos(driverLat * Math.PI / 180) * Math.cos(pickupLat * Math.PI / 180) *
+        Math.sin(dLng/2) * Math.sin(dLng/2);
+      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+      const distance = R * c;
+
+      const rideInfo = {
+        rideId: ride._id,
+        pickup: ride.pickupLocation.address,
+        dropoff: ride.dropoffLocation?.address,
+        fare: ride.fare,
+        distance: distance.toFixed(2),
+        createdAt: ride.createdAt
+      };
+
+      if (distance <= radius) {
+        nearbyRides.push(rideInfo);
+      } else {
+        tooFarRides.push(rideInfo);
+      }
+    });
+
+    // Check socket room
+    const driverId = String(user._id);
+    const driverRoom = `driver-${driverId}`;
+    const roomMembers = io?.sockets?.adapter?.rooms?.get(driverRoom);
+    const isInRoom = roomMembers && roomMembers.size > 0;
+
+    res.json({
+      message: 'Pending rides check',
+      driverLocation: {
+        latitude: driverLat,
+        longitude: driverLng
+      },
+      radius: `${radius}km`,
+      nearbyRides: nearbyRides,
+      tooFarRides: tooFarRides,
+      totalPending: pendingRides.length,
+      nearbyCount: nearbyRides.length,
+      tooFarCount: tooFarRides.length,
+      isInSocketRoom: isInRoom,
+      socketRoom: driverRoom,
+      socketRoomMembers: isInRoom ? roomMembers.size : 0,
+      willReceiveRequests: isInRoom && nearbyRides.length > 0
+    });
+  } catch (error) {
+    console.error('Get pending rides error:', error);
+    res.status(500).json({ message: 'Server error', error: error.message });
   }
 });
 

@@ -213,7 +213,12 @@ router.get('/directions', protect, async (req, res) => {
             errorMessage = 'No route found between origin and destination.';
           }
           
-          console.error('Google Directions API error:', directionsResponse.data.status, directionsResponse.data.error_message || '');
+          // Log error but don't spam console for expected billing errors
+          if (directionsResponse.data.status !== 'REQUEST_DENIED') {
+            console.error('Google Directions API error:', directionsResponse.data.status, directionsResponse.data.error_message || '');
+          } else {
+            console.log('⚠️ Google Directions API: Billing not enabled (expected in development)');
+          }
           
           return res.status(400).json({ 
             message: errorMessage,
