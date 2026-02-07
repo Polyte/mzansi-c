@@ -127,7 +127,7 @@ const calculateAverageMetrics = (items) => {
         acc.fare += (item.fare || item.totalFare || 0);
         acc.distance += (item.distance || 0);
         acc.duration += (item.duration || 0);
-        acc.rating += (item.rating ? .rider ? .stars || item.rating ? .driver ? .stars || 0);
+        acc.rating += (item.rating?.rider?.stars || item.rating?.driver?.stars || 0);
         return acc;
     }, {
         fare: 0,

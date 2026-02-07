@@ -208,7 +208,7 @@ router.post('/', protect, [
                 // Filter by distance and emit to each courier
                 let couriersNotified = 0;
                 couriers.forEach(courier => {
-                    if (!courier.courierInfo ? .currentLocation) {
+                    if (!courier.courierInfo?.currentLocation) {
                         return;
                     }
 
@@ -274,7 +274,7 @@ router.get('/:id', protect, async (req, res) => {
         // Check if user has access to this delivery
         if (req.user.role !== 'admin' &&
             delivery.customer._id.toString() !== req.user.id &&
-            delivery.courier ? ._id ? .toString() !== req.user.id) {
+            delivery.courier?._id?.toString() !== req.user.id) {
             return res.status(403).json({
                 message: 'Access denied'
             });
@@ -550,7 +550,7 @@ router.put('/:id/rate', protect, [
             });
         }
 
-        if (delivery.rating ? .customer ? .stars) {
+        if (delivery.rating?.customer?.stars) {
             return res.status(400).json({
                 message: 'Delivery already rated'
             });
@@ -582,7 +582,7 @@ router.put('/:id/rate', protect, [
                 });
 
                 if (ratedDeliveries.length > 0) {
-                    const totalStars = ratedDeliveries.reduce((sum, d) => sum + (d.rating ? .customer ? .stars || 0), 0);
+                    const totalStars = ratedDeliveries.reduce((sum, d) => sum + (d.rating?.customer?.stars || 0), 0);
                     courier.courierInfo = courier.courierInfo || {};
                     courier.courierInfo.averageRating = totalStars / ratedDeliveries.length;
                     await courier.save();
@@ -632,7 +632,7 @@ router.put('/:id/courier-location', protect, [
             });
         }
 
-        if (delivery.courier ? .toString() !== req.user.id) {
+        if (delivery.courier?.toString() !== req.user.id) {
             return res.status(403).json({
                 message: 'Access denied'
             });
@@ -727,7 +727,7 @@ router.post('/:id/photo', protect, upload.single('photo'), async (req, res) => {
             });
         }
 
-        if (delivery.courier ? .toString() !== req.user.id) {
+        if (delivery.courier?.toString() !== req.user.id) {
             // Delete uploaded file if access denied
             if (req.file.path) {
                 fs.unlinkSync(req.file.path);

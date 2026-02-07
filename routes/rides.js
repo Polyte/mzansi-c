@@ -196,7 +196,7 @@ router.post('/', protect, [
                 let driversTooFar = 0;
                 let driversNotInRoom = 0;
                 drivers.forEach(driver => {
-                    if (!driver.driverInfo ? .currentLocation) {
+                    if (!driver.driverInfo?.currentLocation) {
                         console.log(`⚠️ Driver ${driver._id} has no location set`);
                         return;
                     }
@@ -297,7 +297,7 @@ router.get('/:id', protect, async (req, res) => {
         // Check if user has access to this ride
         if (req.user.role !== 'admin' &&
             ride.rider._id.toString() !== req.user.id &&
-            ride.driver ? ._id ? .toString() !== req.user.id) {
+            ride.driver?._id?.toString() !== req.user.id) {
             return res.status(403).json({
                 message: 'Access denied'
             });
@@ -475,7 +475,7 @@ router.put('/:id/update-status', protect, [
             console.log(`📤 Emitting ride-status-update to ${rideRoom}:`, {
                 rideId: ride._id,
                 status: ride.status,
-                roomMembers: io.sockets.adapter.rooms.get(rideRoom) ? .size || 0
+                roomMembers: io.sockets.adapter.rooms.get(rideRoom)?.size || 0
             });
 
             io.to(rideRoom).emit('ride-status-update', {
@@ -600,7 +600,7 @@ router.put('/:id/rate', protect, [
             });
         }
 
-        if (ride.rating ? .rider ? .stars) {
+        if (ride.rating?.rider?.stars) {
             return res.status(400).json({
                 message: 'Ride already rated'
             });
@@ -642,7 +642,7 @@ router.put('/:id/rate', protect, [
                 });
 
                 if (ratedRides.length > 0) {
-                    const totalStars = ratedRides.reduce((sum, r) => sum + (r.rating ? .rider ? .stars || 0), 0);
+                    const totalStars = ratedRides.reduce((sum, r) => sum + (r.rating?.rider?.stars || 0), 0);
                     driver.driverInfo = driver.driverInfo || {};
                     driver.driverInfo.averageRating = totalStars / ratedRides.length;
                     await driver.save();
