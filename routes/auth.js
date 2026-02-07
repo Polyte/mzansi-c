@@ -331,7 +331,7 @@ router.get('/me', protect, async (req, res) => {
             email: user.email,
             isDriver: user.isDriver,
             hasDriverInfo: !!user.driverInfo,
-            isVerified: user.driverInfo ? .isVerified,
+            isVerified: user.driverInfo?.isVerified,
             driverInfo: user.driverInfo
         });
 
